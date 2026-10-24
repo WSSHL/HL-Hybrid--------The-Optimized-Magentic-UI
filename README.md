@@ -60,31 +60,89 @@ Examples (a click's `target_id`): `6` → PASS · `{"id":29}` / `"29"` → REPAI
 
 ## Repository layout
 
+### Directory tree
+
+The tree below shows the main directories and all eleven files changed by this
+project. `[new]` and `[modified]` refer to changes relative to Magentic-UI 0.1.6.
+Other upstream files and individual generated UI assets are omitted for readability.
+
+```text
+.
+├── README.md                              # Project overview and setup instructions
+├── LICENSE-magentic-ui                    # Upstream MIT licence
+├── NOTICE                                 # Attribution and redistribution notices
+├── docs/
+│   └── cost_vs_accuracy.png               # Evaluation results
+├── contribution/                          # Focused change set for upstream 0.1.6
+│   ├── CORE_CHANGES.md                    # Explanation of the eleven changed files
+│   ├── eval_config.yaml                   # CLI model configuration
+│   ├── qwen3-nothink.Modelfile             # Qwen3 model with thinking disabled
+│   ├── patches/
+│   │   └── magentic-ui-0.1.6.patch         # Patch for the six modified upstream files
+│   └── src/magentic_ui/                   # Copies of the five new modules below
+└── src/
+    ├── eval_config.yaml                   # CLI model configuration
+    ├── qwen3-nothink.Modelfile             # Qwen3 model with thinking disabled
+    ├── baks/                              # Flat backup directory
+    │   ├── hl_config.py
+    │   ├── _weak_validator.py
+    │   ├── _model_rotation.py
+    │   ├── _answer_verifier.py
+    │   ├── _consent.py
+    │   ├── _web_surfer.py
+    │   ├── _orchestrator.py
+    │   ├── _prompts.py
+    │   ├── playwright_controller.py
+    │   ├── page_script.js
+    │   ├── connection.py
+    │   ├── eval_config.yaml
+    │   └── qwen3-nothink.Modelfile
+    └── magentic_ui/                       # Complete package with the changes applied
+        ├── hl_config.py                   # [new] Reliability-layer settings
+        ├── _cli.py                        # Legacy command-line task runner
+        ├── task_team.py                   # Agent-team setup
+        ├── magentic_ui_config.py          # Package configuration
+        ├── agents/
+        │   ├── web_surfer/
+        │   │   ├── _web_surfer.py         # [modified] Web agent and reliability hooks
+        │   │   └── _consent.py            # [new] Cookie/consent banner handling
+        │   ├── file_surfer/
+        │   ├── users/
+        │   └── mcp/
+        ├── teams/
+        │   └── orchestrator/
+        │       ├── _orchestrator.py       # [modified] Task coordination and checks
+        │       ├── _prompts.py            # [modified] Prompts and plan validation
+        │       ├── _weak_validator.py     # [new] Tool-call validation and repair
+        │       ├── _model_rotation.py     # [new] On-demand model routing
+        │       └── _answer_verifier.py    # [new] Final-answer verification
+        ├── tools/
+        │   ├── playwright/
+        │   │   ├── playwright_controller.py  # [modified] Browser-action handling
+        │   │   ├── page_script.js         # [modified] Page-element labels
+        │   │   ├── browser/
+        │   │   └── utils/
+        │   └── mcp/
+        ├── backend/
+        │   ├── cli.py                     # Web UI server entry point
+        │   ├── database/
+        │   ├── datamodel/
+        │   ├── teammanager/
+        │   └── web/
+        │       ├── managers/
+        │       │   └── connection.py      # [modified] Message-content handling
+        │       ├── routes/
+        │       └── ui/                    # Bundled web UI assets
+        ├── cli/                           # Command-line task execution
+        ├── eval/                          # Evaluation benchmarks and runners
+        └── learning/
 ```
-contribution/
-  src/magentic_ui/                 # NEW modules -- original work
-    hl_config.py                   # every setting of this layer, in one dict
-    teams/orchestrator/
-      _weak_validator.py           # PASS/REPAIR/ESCALATE/SKIP; recovers a call written as text
-      _model_rotation.py           # on-demand routing: five escalation sources, one flag
-      _answer_verifier.py          # judges the final answer; a FAIL is a routing signal
-    agents/web_surfer/
-      _consent.py                  # cookie / consent banner dismissal, with a time budget
-  patches/
-    magentic-ui-0.1.6.patch        # the edits to six Magentic-UI files
-  CORE_CHANGES.md                  # what each of the eleven changed files does
-  eval_config.yaml                 # model config for the CLI runs
-  qwen3-nothink.Modelfile          # builds qwen3-nothink from qwen3:14b
-src/
-  magentic_ui/                    # complete package with the project changes applied
-  baks/                           # backups of the modified modules
-  eval_config.yaml
-  qwen3-nothink.Modelfile
-docs/
-  cost_vs_accuracy.png            # evaluation results
-LICENSE-magentic-ui                # Magentic-UI's MIT licence
-NOTICE                             # attribution
-```
+
+The backups in `src/baks/` are stored without their original subdirectories. Use the
+paths under `src/magentic_ui/` above to locate the corresponding Python and JavaScript
+files. The backup configuration and Modelfile belong directly under `src/`.
+For installation or recovery, follow the steps below rather than copying the entire
+flat backup directory into the installed package.
 
 Reports are not included in this repository. The source package is available directly
 under [`src/`](src/) rather than as a ZIP archive.
