@@ -1,0 +1,19 @@
+
+orchestrator_client: &ollama_client
+  provider: autogen_ext.models.ollama.OllamaChatCompletionClient
+  config:
+    model: qwen3-nothink
+    host: http://localhost:11434
+    max_retries: 5
+    model_info:
+      vision: false
+      function_calling: true
+      json_output: true
+      family: unknown
+      structured_output: false
+      multiple_system_messages: false
+
+web_surfer_client: *ollama_client
+coder_client: *ollama_client
+file_surfer_client: *ollama_client
+action_guard_client: *ollama_client

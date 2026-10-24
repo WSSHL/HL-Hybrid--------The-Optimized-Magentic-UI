@@ -5,7 +5,7 @@ A weak-validation + on-demand model-routing layer that lets the
 **local small model** (Qwen3 14B with thinking disabled, via Ollama) and borrow a cloud
 model (o3) only when the local model is stuck.
 
-> KCL Final Year Project · Author: **Haolun Shan** · Final submission, August 2026
+> KCL Final Year Project · Final submission, August 2026
 
 ![Accuracy against cost per task](docs/cost_vs_accuracy.png)
 
@@ -75,14 +75,20 @@ contribution/
   CORE_CHANGES.md                  # what each of the eleven changed files does
   eval_config.yaml                 # model config for the CLI runs
   qwen3-nothink.Modelfile          # builds qwen3-nothink from qwen3:14b
+src/
+  magentic_ui/                    # complete package with the project changes applied
+  baks/                           # backups of the modified modules
+  eval_config.yaml
+  qwen3-nothink.Modelfile
+  readme.txt                      # original setup notes
 docs/
-  FYP_report_stage5.pdf            # interim (stage 5) report, in Chinese
-  HAOLUNSHAN_1908837_YALIDU_SupplementalFile_2025-26.zip   # the code package as submitted
+  cost_vs_accuracy.png            # evaluation results
 LICENSE-magentic-ui                # Magentic-UI's MIT licence
 NOTICE                             # attribution
 ```
 
-The final report is not included in this repository.
+Reports are not included in this repository. The source package is available directly
+under [`src/`](src/) rather than as a ZIP archive.
 
 ## How to run
 
@@ -97,8 +103,8 @@ playwright install chromium
 
 Install the layer into the package, either way:
 
-* replace the installed `magentic_ui/` folder with `src/magentic_ui/` from the zip in
-  `docs/`, or
+* replace the installed `magentic_ui/` folder with this repository's
+  [`src/magentic_ui/`](src/magentic_ui/) folder, or
 * apply the patch and copy the modules, as in
   [`contribution/CORE_CHANGES.md`](contribution/CORE_CHANGES.md).
 
@@ -154,3 +160,4 @@ during such a run.
 
 Built on [Magentic-UI](https://github.com/microsoft/magentic-ui) by Microsoft (MIT). The
 modules under `contribution/src/` are original work for a KCL FYP. See `NOTICE`.
+

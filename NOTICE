@@ -2,7 +2,7 @@ This project builds on Magentic-UI (https://github.com/microsoft/magentic-ui),
 Copyright (c) 2025 Microsoft, licensed under the MIT License. The full licence text is
 in `LICENSE-magentic-ui`.
 
-The modules under `contribution/src/` are original work by Haolun Shan, produced for a
+The modules under `contribution/src/` are original work produced for a
 King's College London Final Year Project (2025-2026).
 
 `contribution/patches/magentic-ui-0.1.6.patch` modifies six Magentic-UI files:
@@ -12,8 +12,7 @@ King's College London Final Year Project (2025-2026).
 lines are this project's work; the context lines in the patch are Microsoft's code
 under the MIT License.
 
-`docs/HAOLUNSHAN_1908837_YALIDU_SupplementalFile_2025-26.zip` is the code package as
-submitted. It contains the complete Magentic-UI 0.1.6 package with the changes above
+`src/magentic_ui/` contains the complete Magentic-UI 0.1.6 package with the changes above
 applied, redistributed under the MIT License; bundled front-end assets carry their own
 licence files (`*.js.LICENSE.txt`).
 
