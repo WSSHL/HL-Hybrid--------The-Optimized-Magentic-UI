@@ -1,4 +1,4 @@
-# Reliability layer for a local-LLM Magentic-UI web agent
+# The-Optimized-Magentic-UI with Reliability layers for a local-LLM Magentic-UI web agent
 
 A weak-validation + on-demand model-routing layer that lets the
 [Magentic-UI](https://github.com/microsoft/magentic-ui) multi-agent web agent run on a
