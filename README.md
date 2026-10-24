@@ -80,7 +80,6 @@ src/
   baks/                           # backups of the modified modules
   eval_config.yaml
   qwen3-nothink.Modelfile
-  readme.txt                      # original setup notes
 docs/
   cost_vs_accuracy.png            # evaluation results
 LICENSE-magentic-ui                # Magentic-UI's MIT licence
@@ -92,50 +91,125 @@ under [`src/`](src/) rather than as a ZIP archive.
 
 ## How to run
 
-Requirements: Docker running, Anaconda, an NVIDIA GPU with 16 GB of VRAM (slower without).
+The GPU-based setup below uses Docker, Anaconda, and an NVIDIA GPU with 16 GB of VRAM.
+Make sure Docker is running before you start. Run the commands from the repository
+root in PowerShell unless a step says otherwise.
 
-```bash
+### 1. Create an environment and install Magentic-UI
+
+Creating a separate Conda environment is optional, but keeps the project dependencies
+separate from your other Python environments.
+
+```powershell
 conda create -n mgui python=3.12 -y
 conda activate mgui
 pip install "magentic-ui[ollama]==0.1.6"
 playwright install chromium
 ```
 
-Install the layer into the package, either way:
+### 2. Install the project changes
 
-* replace the installed `magentic_ui/` folder with this repository's
-  [`src/magentic_ui/`](src/magentic_ui/) folder, or
-* apply the patch and copy the modules, as in
+Choose one of the following methods:
+
+* Replace the installed `magentic_ui/` folder with this repository's
+  [`src/magentic_ui/`](src/magentic_ui/) folder.
+* Apply the patch and copy the new modules, following
   [`contribution/CORE_CHANGES.md`](contribution/CORE_CHANGES.md).
 
-`pip show magentic-ui` gives the install location.
+To find the installation directory, run:
 
-Put your OpenAI API key in `magentic_ui/hl_config.py`, in the `OPENAI_API_KEY` field.
+```powershell
+pip show magentic-ui
+```
 
-Start Ollama and build the no-thinking model:
+The installed `magentic_ui/` folder is inside the directory shown under `Location`.
+In that installed folder, open `hl_config.py` and set `OPENAI_API_KEY` to your OpenAI
+API key. Keep the key private; do not commit it to GitHub.
 
-```bash
+### 3. Start Ollama and prepare the local model
+
+Start the Ollama container, download Qwen3 14B, and build the `qwen3-nothink` model:
+
+```powershell
 docker run -d --gpus all -v ollama:/root/.ollama -p 11434:11434 --name ollama -e OLLAMA_FLASH_ATTENTION=1 -e OLLAMA_KV_CACHE_TYPE=q8_0 -e OLLAMA_CONTEXT_LENGTH=32768 ollama/ollama
 docker exec ollama ollama pull qwen3:14b
 docker cp contribution/qwen3-nothink.Modelfile ollama:/tmp/m
 docker exec ollama ollama create qwen3-nothink -f /tmp/m
 ```
 
-Run the web UI with `magentic-ui --port 8081`, then under Settings → Advanced settings
-set the model to `qwen3-nothink` and `vision` to `false`.
+The Modelfile is included in the repository; you do not need to create it manually.
 
-Or run one task from the command line (PowerShell), with `eval_config.yaml` in the
-current folder:
+### 4. Launch and configure the web UI
+
+Start Magentic-UI:
 
 ```powershell
+magentic-ui --port 8081
+```
+
+Open [http://localhost:8081](http://localhost:8081), then go to **Settings → Advanced
+settings**. Set `model` to `qwen3-nothink` and `vision` to `false`. The relevant model
+configuration is:
+
+```yaml
+model: qwen3-nothink
+host: http://localhost:11434
+max_retries: 5
+model_info:
+  vision: false
+  function_calling: true
+  json_output: true
+  family: unknown
+  structured_output: false
+  multiple_system_messages: false
+```
+
+Click **Apply changes**, then start a new session to use the updated configuration.
+
+### 5. Run tasks from the command line
+
+As an alternative to the web UI, use the CLI. In a PowerShell terminal with the
+`mgui` environment active, change from the repository root to `src/`, which contains
+`eval_config.yaml`:
+
+```powershell
+cd src
 $env:PYTHONIOENCODING="utf-8"
-$task = "Please use Google Maps to check How long does it take to walk from King's College London's Strand Campus to Big Ben? (Answer Precise to minute)."
+$task = "Please use Google Maps to find the walking time from King's College London's Strand Campus to Big Ben. Give the answer in minutes."
 magentic-cli --work-dir ".\work_1" --config eval_config.yaml --autonomous --action-policy never --old-cli --task $task *> "run_1.log"
 ```
 
 `--action-policy never` auto-approves every action, which turns off Magentic-UI's action
 guard. `--autonomous` removes the user from the team, so a CAPTCHA cannot be handed off
-during such a run.
+during such a run. Use these options only for controlled test tasks.
+
+To repeat the same task ten times, stay in `src/` and run the following instead of the
+single-run command. It uses the `$task` value defined above.
+
+**Container cleanup warning:** this example force-removes all running containers
+based on `ghcr.io/microsoft/magentic-ui-browser:0.0.2` after each run. Do not use it
+while other Magentic-UI browser sessions are active.
+
+```powershell
+1..10 | ForEach-Object {
+    magentic-cli --work-dir ".\work_$_" --config eval_config.yaml --autonomous --action-policy never --old-cli --task $task *> "run_$_.log"
+    docker ps -q --filter ancestor=ghcr.io/microsoft/magentic-ui-browser:0.0.2 | ForEach-Object {
+        docker rm -f $_
+    }
+}
+```
+
+Each run writes a log in the current directory, from `run_1.log` to `run_10.log`.
+To test a different task, replace the text assigned to `$task` before running the
+command again.
+
+### Recovering an installation
+
+Backups of the modified modules are stored in [`src/baks/`](src/baks/). If the installed
+package becomes unusable, reinstall Magentic-UI 0.1.6 and reapply the project changes
+using either method in step 2. See
+[`contribution/CORE_CHANGES.md`](contribution/CORE_CHANGES.md) for the list of modified
+files and their locations.
 
 ## Configuration — `magentic_ui/hl_config.py`
 
