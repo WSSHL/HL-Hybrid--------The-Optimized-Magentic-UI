@@ -1,0 +1,2 @@
+# keep the patch byte-exact on every platform, or git apply can fail after a CRLF checkout
+*.patch -text

@@ -1,0 +1,661 @@
+diff -ruN a/magentic_ui/agents/web_surfer/_web_surfer.py b/magentic_ui/agents/web_surfer/_web_surfer.py
+--- a/magentic_ui/agents/web_surfer/_web_surfer.py
++++ b/magentic_ui/agents/web_surfer/_web_surfer.py
+@@ -6,6 +6,11 @@
+ import re
+ import time
+ from datetime import datetime
++#----------------------- start import-------------------------
++from . import _consent as consent
++from ...teams.orchestrator import _weak_validator as w_validator
++from ...teams.orchestrator import _model_rotation as rotation
++# -------------------------------------------------------
+ import tldextract
+ from typing import (
+     Any,
+@@ -139,7 +144,9 @@
+     viewport_height: int = 900
+     viewport_width: int = 1440
+     use_action_guard: bool = False
++    # ---------------------------set default search engine----------------------------------------
+     search_engine: str = "duckduckgo"
++    #------------------------------------------------------------------------------------------------
+ 
+ 
+ class WebSurferState(BaseState):
+@@ -197,7 +204,7 @@
+         multiple_tools_per_call (bool, optional): Whether to allow execution of multiple tool calls sequentially per model call. Default: False.
+         viewport_height (int, optional): The height of the viewport. Default: 1440.
+         viewport_width (int, optional): The width of the viewport. Default: 1440.
+-        search_engine (str, optional): The search engine to use for web searches. Supported engines: "duckduckgo", "google", "bing", "yahoo". Any other value will be treated as a direct website URL to visit. Default: "duckduckgo".
++       search_engine (str, optional): The search engine to use for web searches. Supported engines: "duckduckgo", "google", "bing", "yahoo". Any other value will be treated as a direct website URL to visit. Default: "duckduckgo".
+     """
+ 
+     component_type = "agent"
+@@ -254,7 +261,9 @@
+         viewport_height: int = 900,
+         viewport_width: int = 1440,
+         use_action_guard: bool = False,
++          # ---------------------------  set default search engine----------------------------------------
+         search_engine: str = "duckduckgo",
++         # ---------------------------  set default search engine----------------------------------------
+     ) -> None:
+         """
+         Initialize the WebSurfer.
+@@ -360,6 +369,8 @@
+         self._browser_just_initialized = False
+         self.is_paused = False
+         self._pause_event = asyncio.Event()
++        self.hl_last_consent_url = None
++
+         self.action_guard: BaseApprovalGuard | None = (
+             ApprovalGuardContext.approval_guard() if self.use_action_guard else None
+         )
+@@ -389,7 +400,9 @@
+             url = f"https://search.yahoo.com/search?p={quote_plus(query)}"
+         elif self.search_engine.lower() == "duckduckgo":
+             domain = "duckduckgo.com"
+-            url = f"https://duckduckgo.com/?q={quote_plus(query)}"
++             # --------------------------- use no js point----------------------
++            url = f"https://html.duckduckgo.com/html/?q={quote_plus(query)}"
++              # ----------------------------------------------------------------------
+         else:  # treat as direct website URL
+             domain = self.search_engine
+             url = (
+@@ -499,6 +512,9 @@
+ 
+     async def on_reset(self, cancellation_token: CancellationToken) -> None:
+         """Reset the WebSurfer agent's state."""
++        # ---------------------clear consent state per task----------------
++        self.hl_last_consent_url = None
++        #------------------------------------------------------------------
+         if not self.did_lazy_init:
+             return
+         assert self._page is not None
+@@ -615,7 +631,14 @@
+                 # 1) Generate the next action to take
+                 if self.is_paused:
+                     break
+-                response: str | List[FunctionCall] = ""
++                # ------------------------------------consent auto click -------------------------------
++                if self._page.url != self.hl_last_consent_url:
++                    try:
++                        await consent.hl_skip_consent(self._page)
++                    except Exception:
++                        pass
++                    self.hl_last_consent_url = self._page.url
++                #---------------------------------------------------------------------------------------
+                 need_execute_tool = False
+                 (
+                     response,
+@@ -636,6 +659,9 @@
+ 
+                 found_stop_action = False
+                 if not need_execute_tool:
++                    # ----------------------------no-op monitor, ------------------------------
++                    rotation.hl_ws_noop_monitor(False)  
++                    #------------------------------------------------------------------------
+                     summary_of_response = f"On the webpage '{str(self._page.title)}', we propose the following action: {response}"
+                     self._chat_history.append(
+                         AssistantMessage(
+@@ -661,13 +687,47 @@
+                 else:
+                     # need to execute the tool(s)
+                     assert isinstance(response, list)
++                    response = response[:1]
++                    # ---------------------------- no-op monitor, empty opreation----------------------
++                    if not response:
++                        rotation.hl_ws_noop_monitor(False)  
++                    # ---------------------------- no-op monitor, empty opreation----------------------
+                     for action in response:
+                         assert isinstance(action, FunctionCall)
+                         tool_call_name = action.name
+-                        tool_call_msg = f"{action.name}( {json.dumps(json.loads(action.arguments))} )"
+-                        tool_call_explanation = json.loads(action.arguments).get(
+-                            "explanation"
+-                        )
++
++                       #---------------------------- no-op monitor cant decode tool call -------------------------
++                        try:
++                            tool_args = json.loads(action.arguments)
++                            assert isinstance(tool_args, dict)
++                        except Exception:
++                            rotation.hl_ws_noop_monitor(False)
++                            raise
++                       #---------------------------- no-op monitor cant decode tool call-------------------------
++
++                        # ----------------------------weak validation before tool execute--------------------
++                        wv_state, _wv_args, wv_reason = w_validator.hl_validate_call(tool_call_name, tool_args)
++                        print(f"[WEAK_VALIDATOR] {wv_state} | tool={tool_call_name}")
++                        if wv_state != "ESCALATE":
++                            tool_args = _wv_args  # PASS/REPAIR/SKIP use returned args  ESCALATE is refused
++                         # ----------------------------weak validation before tool exec--------------------
++
++                        # ---------------------------------only no "ESCALATE" call loop breaker ------------------------------------
++                        if wv_state != "ESCALATE":
++                            rotation.hl_ws_loop_monitor(tool_call_name, tool_args)
++                        # --------------------------------only no "ESCALATE" call loop breaker------------------------------------
++                        
++                        # ---------------------noop nonitor update------------------
++                        rotation.hl_ws_noop_monitor(wv_state != "ESCALATE")
++                       # ---------------------noop nonitor update ------------------
++
++
++                       #-------------------------regenerate a new function call with returned args----------------------------------------      
++                        action = FunctionCall(id=action.id,name=action.name,arguments=json.dumps(tool_args, ensure_ascii=False),)
++                        tool_call_msg = f"{action.name}( {json.dumps(tool_args)} )"
++                        expl = tool_args.get("explanation")
++                        tool_call_explanation = expl.strip() if isinstance(expl, str) and expl.strip() else "None"
++                         #-------------------------regenerate a new function call with returned args----------------------------------------  
+                         if tool_call_name == "answer_question":
+                             tool_call_explanation = (
+                                 "Reading the entire page... " + tool_call_explanation
+@@ -683,7 +743,7 @@
+                         )
+ 
+                         require_approval: bool = False
+-                        tool_args = json.loads(action.arguments)
++
+                         assert isinstance(tool_args, dict)
+                         if self.use_action_guard and self.action_guard is not None:
+                             # find the tool schema given the name
+@@ -729,9 +789,10 @@
+                             )
+ 
+                         if tool_call_name == "stop_action":
+-                            tool_call_answer = json.loads(action.arguments).get(
+-                                "answer"
+-                            )
++                        #--------------------------------------prevent an empty stop action answer------------------------
++                            ans = tool_args.get("answer")
++                            tool_call_answer = ans.strip() if isinstance(ans, str) and ans.strip() else "None"
++                          #--------------------------------------prevent an empty stop action answer------------------------
+                             observations.append(tool_call_answer)
+                             action_results.append(tool_call_answer)
+                             emited_responses.append(tool_call_answer)
+@@ -824,6 +885,12 @@
+                         # execute the tool call
+                         action_result = ""
+                         try:
++                            # ------------------------ block unsafe weak calls --------------------------------
++                            if wv_state == "ESCALATE":
++                                raise ValueError(
++                                    f"Weak validator escalation for {tool_call_name}: {wv_reason}"
++                                )
++                            #  ------------------------ block unsafe weak calls --------------------------------
+                             action_result = await self._execute_tool(
+                                 message=[action],
+                                 rects=rects,
+@@ -1014,6 +1081,8 @@
+                 - Dict[str, str]: Mapping of element IDs
+                 - bool: Boolean indicating if tool execution is needed
+         """
++        # ----------------------------keep on the bolcked page if streen shot work ----------------------------
++        self.hl_blocked_url = None
+         try:
+             assert self._page is not None
+             await self._playwright_controller._ensure_page_ready(self._page)  # type: ignore
+@@ -1022,12 +1091,23 @@
+                 is not None
+             )
+         except Exception as e:
+-            # open a new tab and point it to about:blank
+-            self.logger.error(f"Page is not accessible, creating a new one: {e}")
+-            assert self._context is not None
+-            self._page = await self._playwright_controller.create_new_tab(
+-                self._context, "about:blank"
+-            )
++            alive = False
++            try:
++                if self._page is not None:
++                    await self._playwright_controller.get_screenshot(self._page)
++                    alive = True
++            except Exception:
++                alive = False
++            if alive:
++                self.hl_blocked_url = self._page.url
++                print("[WEB_SURFER] page refuses automation script")
++            else:
++                self.logger.error(f"Page is not accessible, creating a new one: {e}")
++                assert self._context is not None
++                self._page = await self._playwright_controller.create_new_tab(
++                    self._context, "about:blank"
++                )
++       # ----------------------------keep on the bolcked page if streen shot work ----------------------------
+ 
+         # Clone the messages to give context, removing old screenshots
+         history: List[LLMMessage] = []
+@@ -1047,7 +1127,12 @@
+         history.extend(filtered_history)
+ 
+         # Ask the page for interactive elements, then prepare the state-of-mark screenshot
+-        rects = await self._playwright_controller.get_interactive_rects(self._page)
++        #------------------------------------------ignore the exception still keep on the bloicked page---------------
++        try:
++            rects = await self._playwright_controller.get_interactive_rects(self._page)
++        except Exception:
++            rects = {}
++        #-----------------------------------------------------------------------------------------------
+         # viewport = await self._playwright_controller.get_visual_viewport(self._page)
+         screenshot = await self._playwright_controller.get_screenshot(self._page)
+         som_screenshot, visible_rects, rects_above, rects_below, element_id_mapping = (
+@@ -1108,12 +1193,19 @@
+         #    tools.append(TOOL_UPLOAD_FILE)
+ 
+         # Focus hint
+-        focused = await self._playwright_controller.get_focused_rect_id(self._page)
++        #------------------------------------------ignore the exception still keep on the bloicked page---------------
++        try:
++            focused = await self._playwright_controller.get_focused_rect_id(self._page)
++        except Exception:  # blocked page
++            focused = None
+         focused = reverse_element_id_mapping.get(focused, focused)
++        if focused is None or str(focused).strip().lower() in {"", "none", "null"}:
++            focused = None
++        #------------------------------------------ignore the exception still keep on the bloicked page---------------
+ 
+         focused_hint = ""
+         if focused:
+-            name = self._target_name(focused, rects)
++            name = self._target_name(focused, rects) or ""
+             if name:
+                 name = f"(and name '{name}') "
+ 
+@@ -1156,8 +1248,15 @@
+             other_targets_str = ""
+ 
+         tool_names = WebSurfer._tools_to_names(tools)
+-
+-        webpage_text = await self._playwright_controller.get_visible_text(self._page)
++        # --------------------blocked page give the captcha hint------------------------------------------
++        try:
++            webpage_text = await self._playwright_controller.get_visible_text(self._page)
++        except Exception:  
++            webpage_text = ""
++        if self.hl_blocked_url:
++            webpage_text = f"""[This page refuses the automation scripts, most likely an anti-bot or CAPTCHA check at {self.hl_blocked_url[:120]}.
++Do NOT navigate away: ask the user to solve the challenge in the browser window, then wait or refresh this page and continue.]"""
++         # --------------------blocked page give the captcha hint------------------------------------------
+ 
+         if not self.json_model_output:
+             text_prompt = WEB_SURFER_TOOL_PROMPT.format(
+@@ -1187,6 +1286,11 @@
+                 focused_hint=focused_hint,
+             ).strip()
+ 
++        # ----------------------------------------attach som screen shot for stronger modle---------------
++        rotation.ws_som_image = None
++        if (not self.is_multimodal) and rotation.ws_route_on:
++            rotation.ws_som_image = AGImage.from_pil(som_screenshot.resize((self.MLM_WIDTH, self.MLM_HEIGHT)))
++        # ----------------------------------------attach som screen shot for stronger modle---------------
+         if self.is_multimodal:
+             # Scale the screenshot for the MLM, and close the original
+             scaled_som_screenshot = som_screenshot.resize(
+@@ -1242,27 +1346,39 @@
+                 if self.multiple_tools_per_call:
+                     create_args["parallel_tool_calls"] = True
+             if create_args is not None:
+-                response = await self._model_client.create(
++        #--------------------------------------------------replace all the websurfer call to model rotation and let rotation package decide the call is on local model or on cloud model--------------
++                response = await rotation.hl_ws_call(
++                    self,
+                     token_limited_history,
+                     tools=tools,
+                     cancellation_token=cancellation_token,
+                     extra_create_args=create_args,
+-                )
+-            else:
+-                response = await self._model_client.create(
++                )  
++            else:          
++                response = await rotation.hl_ws_call(
++                    self,
+                     token_limited_history,
+                     tools=tools,
+                     cancellation_token=cancellation_token,
+-                )
+-        else:
+-            response = await self._model_client.create(
++                )         
++        else:         
++            response = await rotation.hl_ws_call(
++                self,
+                 token_limited_history,
+                 cancellation_token=cancellation_token,
+             )
+         self.model_usage.append(response.usage)
++   #--------------------------------------------------replace all the websurfer call to model rotation and let rotation package decide the call is on local model or on cloud model--------------
+         self._last_download = None
+         if not self.json_model_output:
+             to_execute_tool = isinstance(response.content, list)
++          #-------------------------------recover tool call from string--------------------------------------------
++            if not to_execute_tool and isinstance(response.content, str):
++                rec = w_validator.hl_recover_call(response.content, {t["name"] for t in tools})
++                if rec is not None:
++                    print(f"[WEAK_VALIDATOR] RECOVER |tool={rec[0]}")
++                    return [FunctionCall(id="weak_recovered", name=rec[0], arguments=json.dumps(rec[1]))], rects, tools, element_id_mapping, True
++           #-------------------------------recover tool call from string--------------------------------------------
+             return (
+                 response.content,
+                 rects,
+@@ -1392,8 +1508,11 @@
+         response = await self._playwright_controller.go_back(self._page)
+         if response:
+             return "I clicked the browser back button."
+-        return "No previous page in the browser history or couldn't navigate back."
+-
++        #-----------------------------------a hint for switch tab------------------------------
++        return """No previous page in the browser history or couldn't navigate back.
++                This tab has no history and was likely opened as a new tab, for example by an advertisement.
++                Use switch_tab to return to one of the other open tabs."""
++        #-----------------------------------a hint for switch tab------------------------------ 
+     async def _execute_tool_refresh_page(self, args: Dict[str, Any]) -> str:
+         assert self._page is not None
+         await self._playwright_controller.refresh_page(self._page)
+@@ -1968,12 +2087,15 @@
+                 content = f"Page content:\n{page_markdown}\n\n{prompt}"
+ 
+         # Create the message with the content and image
++        #------------------ if is_multimodal modle add an iimage and tex ,if not just add text---------------------------------
++        qa_content: Any = [content, ag_image] if self.is_multimodal else content
+         messages.append(
+             UserMessage(
+-                content=[content, ag_image],
++                content=qa_content,
+                 source=self.name,
+             )
+         )
++        # ----------------------------------------------
+ 
+         # Generate the response
+         response = await self._model_client.create(
+diff -ruN a/magentic_ui/backend/web/managers/connection.py b/magentic_ui/backend/web/managers/connection.py
+--- a/magentic_ui/backend/web/managers/connection.py
++++ b/magentic_ui/backend/web/managers/connection.py
+@@ -567,7 +567,7 @@
+ 
+                 message_content: list[dict[str, Any]] = []
+                 for row in message_dump["content"]:
+-                    if "data" in row:
++                    if isinstance(row, dict) and "data" in row:
+                         message_content.append(
+                             {
+                                 "url": f"data:image/png;base64,{row['data']}",
+diff -ruN a/magentic_ui/teams/orchestrator/_orchestrator.py b/magentic_ui/teams/orchestrator/_orchestrator.py
+--- a/magentic_ui/teams/orchestrator/_orchestrator.py
++++ b/magentic_ui/teams/orchestrator/_orchestrator.py
+@@ -64,6 +64,10 @@
+     validate_sentinel_condition_check_json,
+ )
+ from ._utils import is_accepted_str, extract_json_from_string
++# ---------------------------import----------------------------------
++from . import _model_rotation as rotation
++from . import _answer_verifier as verifier
++# ---------------------------import----------------------------------
+ from loguru import logger as trace_logger
+ 
+ 
+@@ -466,7 +470,8 @@
+                         UserMessage(content=exception_message, source=self._name)
+                     )
+                 token_limited_messages = await self._model_context.get_messages()
+-                response = await self._model_client.create(
++                response = await rotation.hl_or_call(
++                    self,
+                     token_limited_messages,
+                     json_output=True
+                     if self._model_client.model_info["json_output"]
+@@ -480,18 +485,16 @@
+                     # Use the validate_json function to check the response
+                     if validate_json(json_response):
+                         return json_response
+-                    else:
+-                        exception_message = "Validation failed for JSON response, retrying. You must return a valid JSON object parsed from the response."
+-                        await self._log_message(
+-                            f"Validation failed for JSON response: {json_response}, retrying ({retries}/{self._config.max_json_retries})"
+-                        )
++                    exception_message = "Validation failed for JSON response, retrying. You must return a valid JSON object parsed from the response."
++                    await self._log_message(
++                        f"Validation failed for JSON response: {json_response}, retrying ({retries}/{self._config.max_json_retries})"
++                    )
+                 except json.JSONDecodeError as e:
+                     json_response = extract_json_from_string(response.content)
+                     if json_response is not None:
+                         if validate_json(json_response):
+                             return json_response
+-                        else:
+-                            exception_message = "Validation failed for JSON response, retrying. You must return a valid JSON object parsed from the response."
++                        exception_message = "Validation failed for JSON response, retrying. You must return a valid JSON object parsed from the response."
+                     else:
+                         exception_message = f"Failed to parse JSON response, retrying. You must return a valid JSON object parsed from the response. Error: {e}"
+                     await self._log_message(
+@@ -499,11 +502,11 @@
+                     )
+                 retries += 1
+             await self._log_message_agentchat(
+-                f"Failed to get a valid JSON response after multiple retries {retries}, last error: {exception_message} and response: {response_content}",
+-                internal=False,
++            f"Failed to get a valid JSON response after multiple retries {retries}, last error: {exception_message} and response: {response_content}",
++            internal=False,
+             )
+             raise ValueError(
+-                f"Failed to get a valid JSON response after multiple retries {retries}, last error: {exception_message} and response: {response_content}"
++            f"Failed to get a valid JSON response after multiple retries {retries}, last error: {exception_message} and response: {response_content}"
+             )
+         except Exception as e:
+             await self._log_message_agentchat(
+@@ -528,6 +531,9 @@
+             return
+         assert message is not None and message.messages is not None
+ 
++        #--------------reset routing per run----------------------------
++        rotation.hl_or_reset_routing()
++        #--------------reset routing per run----------------------------
+         # send message to all agents with initial user message
+         await self.publish_message(
+             GroupChatStart(messages=message.messages),
+@@ -987,11 +993,27 @@
+         assert progress_ledger is not None
+         # log the progress ledger
+         await self._log_message_agentchat(dict_to_str(progress_ledger), internal=True)
++        # ----------------stall/idle monitor/model rotation----------------
++        rotation.hl_or_monitor(progress_ledger)  
++        replan_threshold_reached = rotation.or_route_pending
++        # ----------------stall/idle monitor/model rotation----------------
+         if not first_step:
+             # Check for replans
+             need_to_replan = progress_ledger["need_to_replan"]["answer"]
+             replan_reason = progress_ledger["need_to_replan"]["reason"]
+ 
++            #-------------------------prevent frequent replan 2 replans trigger stall---------------------------------
++            if need_to_replan and not replan_threshold_reached:
++                stall_count = rotation.counts["or_stalls"]
++                print(f"[REPLAN_GUARD] hold current plan | stalls={stall_count} | reason={str(replan_reason)[:200]}")
++                need_to_replan = False
++                current_details = str(self._state.plan[self._state.current_step_idx].details)
++                progress_ledger["instruction_or_question"]["answer"] = f"""The first replan request was held. Please continue the current step instead of creating a new plan.
++Reported blocker: {replan_reason}
++Do not repeat the previous actions. Please consider to choose another new action based on  the information on the current page.
++Current step: {current_details}"""
++            #-------------------------prevent frequent replan---------------------------------
++
+             if need_to_replan and self._config.allow_for_replans:
+                 # Replan
+                 if self._config.max_replans is None:
+@@ -1009,11 +1031,32 @@
+             elif need_to_replan:
+                 await self._prepare_final_answer(
+                     f"The current plan failed to complete the task, we need a new plan to continue. {replan_reason}",
+-                    cancellation_token,
+-                )
++                    cancellation_token,)
+                 return
+             if progress_ledger["is_current_step_complete"]["answer"]:
+-                self._state.current_step_idx += 1
++                #------------------------- strong model verify answer if whole task on small modle--------------------------------------------
++                verify_step = self._state.current_step_idx >= len(self._state.plan) - 1
++                verify_img = None
++                if verifier.hl_verify_on() and verify_step:
++                    container = await self._runtime.try_get_underlying_agent_instance(
++                        AgentId(type=self._participant_name_to_topic_type[self._web_agent_topic],key=self.id.key,))
++                    ws = container._agent
++                    _, shot, _ = await ws.describe_current_page()
++                    verify_img = AGImage.from_pil(PIL.Image.open(io.BytesIO(shot)))
++                verify_evidence = (
++                    str(progress_ledger["instruction_or_question"]["answer"])
++                    + "\n" + self._state.information_collected
++                    + "\n" + progress_ledger["progress_summary"]).strip()
++                if (not verify_step) or await verifier.hl_verify_answer(
++                    self._state.task, verify_evidence, cancellation_token, image=verify_img):
++                    self._state.current_step_idx += 1
++                else:
++                    previous_instruction = str(progress_ledger["instruction_or_question"]["answer"])
++                    progress_ledger["instruction_or_question"]["answer"] = f"""The previous result was verifyed incomplete or incorrect by a verifier.
++Re-examine the page, use a more targeted or official approach (e.g. sort by date or use a proper search), gather more evidence, and produce a complete, verified answer. {previous_instruction}"""
++
++                    progress_ledger["instruction_or_question"]["agent_name"] = self._web_agent_topic
++                #------------------------- strong model verify answer--------------------------------------------
+ 
+         if progress_ledger["progress_summary"] != "":
+             self._state.information_collected += (
+@@ -1181,11 +1224,13 @@
+             metadata={"internal": "no", "type": "plan_message"},
+         )
+         # next speaker is user
+-        if self._config.cooperative_planning:
++        # ----------------------auto continue replan-----------------------
++        if self._config.cooperative_planning and not rotation.or_auto_replan:
+             await self._request_next_speaker(self._user_agent_topic, cancellation_token)
+         else:
+             self._state.in_planning_mode = False
+             await self._orchestrate_step_execution(cancellation_token, first_step=True)
++        # ----------------------auto continue replan-----------------------
+ 
+     async def _prepare_final_answer(
+         self,
+@@ -1222,8 +1267,10 @@
+                 await self._model_context.add_message(msg)
+             token_limited_context = await self._model_context.get_messages()
+ 
+-            response = await self._model_client.create(
+-                token_limited_context, cancellation_token=cancellation_token
++            response = await rotation.hl_or_call(
++                self,
++                token_limited_context,
++                cancellation_token=cancellation_token,
+             )
+             assert isinstance(response.content, str)
+             final_answer = response.content
+diff -ruN a/magentic_ui/teams/orchestrator/_prompts.py b/magentic_ui/teams/orchestrator/_prompts.py
+--- a/magentic_ui/teams/orchestrator/_prompts.py
++++ b/magentic_ui/teams/orchestrator/_prompts.py
+@@ -385,7 +385,7 @@
+ To make progress on the request, please answer the following questions, including necessary reasoning:
+ 
+     - is_current_step_complete: Is the current step complete? (True if complete, or False if the current step is not yet complete)
+-    - need_to_replan: Do we need to create a new plan? (True if user has sent new instructions and the current plan can't address it. True if the current plan cannot address the user request because we are stuck in a loop, facing significant barriers, or the current approach is not working. False if we can continue with the current plan. Most of the time we don't need a new plan.)
++    - need_to_replan: Do we need to create a new plan? (True if user has sent new instructions and the current plan can't address it. True if the current plan cannot address the user request because we are stuck in a loop, facing significant barriers, or the current approach is not working. If the web_surfer repeatedly hits the same grounding failures on a page (for example "strict mode violation", "element not found", or duplicate/ambiguous element ids), treat the current approach as not working and prefer a DIFFERENT method to reach the goal -- for example the site's simple search box or a direct results URL -- rather than asking for more precise clicks on the same controls. False if we can continue with the current plan. Most of the time we don't need a new plan.)
+     - instruction_or_question: 
+         Provide complete instructions to accomplish the current step with all context needed about the task and the plan. Provide a very detailed reasoning chain for how to complete the step.
+ 
+@@ -479,6 +479,10 @@
+         if key not in json_response:
+             return False
+     plan = json_response["steps"]
++    #-----------------------return false when step is not a list------------
++    if not isinstance(plan, list):
++        return False
++     #-----------------------return false when step is not a list------------
+     for item in plan:
+         if not isinstance(item, dict):
+             return False
+diff -ruN a/magentic_ui/tools/playwright/page_script.js b/magentic_ui/tools/playwright/page_script.js
+--- a/magentic_ui/tools/playwright/page_script.js
++++ b/magentic_ui/tools/playwright/page_script.js
+@@ -298,7 +298,11 @@
+                 console.warn("Error finding label for element:", e);
+             }
+         }
+-
++         //----------------------------------get place holder may-------------------
++        if (element.hasAttribute("placeholder")) {
++            return element.getAttribute("placeholder");
++        }
++        //----------------------------------get place holder-------------------
+         if (element.hasAttribute("name")) {
+             return element.getAttribute("name");
+         }
+@@ -316,9 +320,25 @@
+             return element.getAttribute("title")
+         }
+ 
+-        return trimmedInnerText(element);
+     };
+ 
++    //----------------------------------if empty name use the oter element lable instead-------------------
++    let temp = getApproximateAriaName;
++    getApproximateAriaName = function (element) {
++        let name = temp(element);
++        if (name && name.trim()) return name.trim();
++        for (const attr of ["placeholder", "name", "alt", "title"]) {
++            const v = (element.getAttribute(attr) || "").trim();
++        if (v) return v;}
++        let label_elem = Array.from(element.querySelectorAll("[aria-label]"));
++        let labs = label_elem.map(e => {return (e.getAttribute("aria-label") || "").trim();});
++        labs = [...new Set(labs.filter(Boolean))].slice(0, 3);
++        let inner = trimmedInnerText(element);
++        if (labs.length) return (labs.join(" ") + (inner ? " " + inner : "")).trim();
++        return inner;
++    };
++ //----------------------------------if empty name use the oter element lable instead-------------------
++
+     let getApproximateAriaRole = function (element) {
+         let tag = element.tagName.toLowerCase();
+         if (tag == "input" && element.hasAttribute("type")) {
+diff -ruN a/magentic_ui/tools/playwright/playwright_controller.py b/magentic_ui/tools/playwright/playwright_controller.py
+--- a/magentic_ui/tools/playwright/playwright_controller.py
++++ b/magentic_ui/tools/playwright/playwright_controller.py
+@@ -639,6 +639,16 @@
+             raise ValueError(
+                 f"Element with identifier {identifier} is not visible on the page."
+             )
++        # -------------------------------use the first client rectagle when a link have multiline----------------------------
++        try:
++            first_rect = await target.evaluate(
++                "el => { const r = el.getClientRects(); return r.length > 1 ? "
++                "{x: r[0].x, y: r[0].y, width: r[0].width, height: r[0].height} : null; }" )
++            if first_rect and first_rect["width"] > 0 and first_rect["height"] > 0:
++                box = first_rect
++        except Exception:
++            pass 
++        # -------------------------------use the first client rectagle when a link have multiline----------------------------
+         center_x = box["x"] + box["width"] / 2
+         center_y = box["y"] + box["height"] / 2
+ 
+@@ -864,8 +874,24 @@
+             await page.mouse.click(end_x, end_y)
+ 
+             if delete_existing_text:
+-                await page.keyboard.press("ControlOrMeta+A")
+-                await page.keyboard.press("Backspace")
++                # ----------------------------------select all only inside real text area-----------------------
++                try:
++                    editable = await page.evaluate("""
++                                                () => {
++                                                    const element = document.activeElement;
++                                                    if (!element) {
++                                                        return false;}
++                                                    const isInput = element.tagName === "INPUT";
++                                                    const isTextArea = element.tagName === "TEXTAREA";
++                                                    const isEditable = element.isContentEditable;
++                                                    return isInput || isTextArea || isEditable;}
++                                          """)
++                except Exception:
++                    editable = True
++                if editable:
++                    await page.keyboard.press("ControlOrMeta+A")
++                    await page.keyboard.press("Backspace")
++                # ----------------------------------select all only inside real text area-----------------------
+ 
+             if self.animate_actions:
+                 # Type slower for short text, faster for long text

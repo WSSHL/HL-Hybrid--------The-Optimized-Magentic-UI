@@ -1,0 +1,29 @@
+# --- secrets: never commit a real key / launcher ---
+startagent.bat
+*.key
+.env
+.env.*
+secrets*
+
+# --- runtime / logs ---
+*.log
+model_trace.log
+trace*.log
+
+# --- python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+
+# --- os / editor ---
+Thumbs.db
+.DS_Store
+.vscode/
+.idea/
+
+# --- local snapshots (do not publish) ---
+backup_*/
+checkpoint_*/
+iteration*/
+*_BACKUP_*

@@ -1,0 +1,24 @@
+This project builds on Magentic-UI (https://github.com/microsoft/magentic-ui),
+Copyright (c) 2025 Microsoft, licensed under the MIT License. The full licence text is
+in `LICENSE-magentic-ui`.
+
+The modules under `contribution/src/` are original work by Haolun Shan, produced for a
+King's College London Final Year Project (2025-2026).
+
+`contribution/patches/magentic-ui-0.1.6.patch` modifies six Magentic-UI files:
+`agents/web_surfer/_web_surfer.py`, `teams/orchestrator/_orchestrator.py`,
+`teams/orchestrator/_prompts.py`, `tools/playwright/playwright_controller.py`,
+`tools/playwright/page_script.js` and `backend/web/managers/connection.py`. The added
+lines are this project's work; the context lines in the patch are Microsoft's code
+under the MIT License.
+
+`docs/HAOLUNSHAN_1908837_YALIDU_SupplementalFile_2025-26.zip` is the code package as
+submitted. It contains the complete Magentic-UI 0.1.6 package with the changes above
+applied, redistributed under the MIT License; bundled front-end assets carry their own
+licence files (`*.js.LICENSE.txt`).
+
+References:
+Fourney, A., et al. (2024). Magentic-One: A Generalist Multi-Agent System for Solving
+Complex Tasks. Microsoft Research. arXiv:2411.04468.
+Mozannar, H., et al. (2025). Magentic-UI: Towards Human-in-the-loop Agentic Systems.
+Microsoft Research. arXiv:2507.22358.
