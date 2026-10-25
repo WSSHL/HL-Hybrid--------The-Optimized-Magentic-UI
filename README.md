@@ -1,4 +1,4 @@
-# HL-Hybrid: Reliability and Model Routing for Magentic-UI
+# HL-Hybrid: Reliability, Model Routing, and Cost Optimization for Magentic-UI
 
 A weak-validation + on-demand model-routing layer that lets the
 [Magentic-UI](https://github.com/microsoft/magentic-ui) multi-agent web agent run on a
